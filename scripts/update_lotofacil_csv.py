@@ -3,7 +3,6 @@ name: Atualizar Lotofácil CSV
 on:
   workflow_dispatch:
   schedule:
-    # Ajuste o horário se quiser (UTC). Ex: 03:20 UTC = 00:20 no Brasil (dependendo do fuso)
     - cron: "20 3 * * *"
 
 permissions:
@@ -22,6 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -37,15 +37,19 @@ jobs:
         run: |
           python scripts/update_lotofacil_csv.py
 
-      - name: Commit e push se houver mudanças
+      - name: Commit e push seguro (anti-conflito)
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
+          # Atualiza o main local com rebase (sem merge sujo)
+          git pull --rebase origin main
+
+          # Só segue se o CSV mudou
           if [[ -n "$(git status --porcelain data/lotofacil.csv)" ]]; then
             git add data/lotofacil.csv
             git commit -m "Atualizar lotofacil.csv automaticamente"
-            git push origin main
+            git push --force-with-lease origin main
           else
-            echo "Nenhuma mudança no CSV, nada para commitar."
+            echo "Nenhuma mudança no CSV"
           fi
