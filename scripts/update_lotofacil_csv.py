@@ -1,129 +1,80 @@
-import csv
-import os
-import time
-import requests
+name: Atualizar Lotofácil CSV
 
-API_BASE = "https://api.guidi.dev.br/loteria/lotofacil"
-CSV_PATH = os.path.join("data", "lotofacil.csv")
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 3 * * *" # todo dia 03:15 UTC (ajuste se quiser)
 
-def get_json(url: str, retries=5):
-    for i in range(retries):
-        try:
-            r = requests.get(url, timeout=15)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            print(f"Erro na API ({url}) tentativa {i+1}/{retries}: {e}")
-            time.sleep(2)
-    return None
+# Evita dois runs simultâneos (isso causa "fetch first" e push rejeitado)
+concurrency:
+  group: lotofacil-csv-update
+  cancel-in-progress: true
 
-def to_iso_date(date_str: str) -> str:
-    if not date_str:
-        return ""
-    if "-" in date_str:
-        return date_str[:10]
-    if "/" in date_str:
-        d, m, y = date_str.split("/")[:3]
-        return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-    return date_str
+# Permissão explícita para o GITHUB_TOKEN conseguir dar push
+permissions:
+  contents: write
 
-def extract_numbers(j: dict):
-    for key in ["dezenas", "listaDezenas", "numeros", "resultadoOrdenado", "listaDezenasSorteadas"]:
-        if key in j and isinstance(j[key], list):
-            nums = sorted(int(x) for x in j[key][:15])
-            return nums
-    return None
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
-def get_contest_number(j: dict):
-    for key in ["concurso", "numero", "numeroConcurso"]:
-        if key in j:
-            return int(j[key])
-    return None
+    steps:
+      - name: Checkout
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
-def get_contest_date(j: dict):
-    for key in ["data", "dataApuracao", "dataSorteio"]:
-        if key in j:
-            return to_iso_date(j[key])
-    return ""
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-def read_last_contest(path: str):
-    if not os.path.exists(path):
-        return 0
-    last = 0
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader, None)
-        for row in reader:
-            try:
-                last = max(last, int(row[0]))
-            except:
-                pass
-    return last
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
-def append_rows(path: str, rows):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    exists = os.path.exists(path)
+      - name: Executar script de atualização
+        run: |
+          python scripts/update_lotofacil_csv.py
 
-    with open(path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        if not exists:
-            writer.writerow([
-                "concurso","data",
-                "d1","d2","d3","d4","d5","d6","d7","d8","d9",
-                "d10","d11","d12","d13","d14","d15"
-            ])
-        writer.writerows(rows)
+      - name: Commit e push se houver mudanças (com retry e rebase)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
 
-def main():
-    ultimo = get_json(f"{API_BASE}/ultimo")
-    if not ultimo:
-        print("Erro ao buscar último concurso")
-        return
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-    last_api = get_contest_number(ultimo)
-    last_csv = read_last_contest(CSV_PATH)
+          # Se não mudou nada, encerra sem erro
+          git add data/lotofacil.csv || true
+          if git diff --cached --quiet; then
+            echo "Nenhuma mudança para commitar."
+            exit 0
+          fi
 
-    print(f"Último concurso API: {last_api}")
-    print(f"Último concurso CSV: {last_csv}")
+          git commit -m "Atualizar lotofacil.csv automaticamente" || true
 
-    start = last_csv + 1
+          # Tenta algumas vezes porque o remoto pode mudar no meio do run
+          for i in 1 2 3 4 5 6; do
+            echo "Tentativa $i/6: sincronizando e fazendo push..."
 
-    if start > last_api:
-        print("CSV já está atualizado")
-        return
+            # Puxa o estado atual do remoto e rebaseia (com autostash)
+            git fetch origin main
+            git pull --rebase --autostash origin main || true
 
-    rows = []
-    contador = 0
+            # Tenta subir
+            if git push origin HEAD:main; then
+              echo "Push realizado com sucesso."
+              exit 0
+            fi
 
-    for n in range(start, last_api + 1):
-        j = get_json(f"{API_BASE}/{n}")
-        if not j:
-            print(f"Pulando concurso {n} (erro API)")
-            continue
+            echo "Push falhou (provável atualização concorrente). Aguardando e tentando de novo..."
+            sleep $((i * 5))
+          done
 
-        concurso = get_contest_number(j)
-        dezenas = extract_numbers(j)
-
-        if not concurso or not dezenas:
-            print(f"Concurso inválido: {n}")
-            continue
-
-        data = get_contest_date(j)
-        rows.append([concurso, data] + dezenas)
-        contador += 1
-
-        # salva a cada 50 concursos (evita timeout)
-        if contador % 50 == 0:
-            append_rows(CSV_PATH, rows)
-            print(f"Salvo até concurso {concurso}")
-            rows = []
-
-        time.sleep(0.05)  # mais rápido
-
-    if rows:
-        append_rows(CSV_PATH, rows)
-
-    print(f"CSV atualizado até o concurso {last_api}")
-
-if __name__ == "__main__":
-    main()
+          echo "Falha após 6 tentativas de push."
+          exit 1
