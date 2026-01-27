@@ -1,133 +1,36 @@
-import csv
-import os
-import requests
-from datetime import datetime
+name: Atualizar Lotofácil CSV
 
-API_BASE = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
-OUT_PATH = os.path.join("data", "lotofacil.csv")
+on:
+  schedule:
+    - cron: '0 3 * * *'   # roda todo dia às 03:00 UTC
+  workflow_dispatch:      # permite rodar manualmente
 
-HEADERS = [
-    "concurso", "data",
-    "d1","d2","d3","d4","d5","d6","d7","d8","d9","d10","d11","d12","d13","d14","d15"
-]
+jobs:
+  update:
+    runs-on: ubuntu-latest
 
-def fetch_json(url: str) -> dict:
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
 
-def latest_concurso_numero() -> int:
-    j = fetch_json(API_BASE)
-    n = j.get("numero")
-    if not isinstance(n, int):
-        raise RuntimeError("API não retornou 'numero' como int")
-    return n
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-def fetch_concurso(n: int) -> dict:
-    return fetch_json(f"{API_BASE}/{n}")
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
-def parse_row(j: dict) -> list:
-    numero = j.get("numero")
-    data_ap = j.get("dataApuracao")  # geralmente "dd/MM/yyyy"
-    dezenas = j.get("listaDezenas")  # lista de strings ex: ["01","02",...]
+      - name: Executar script de atualização
+        run: |
+          python scripts/update_lotofacil_csv.py
 
-    if not isinstance(numero, int):
-        raise RuntimeError("Concurso sem 'numero' int")
-    if not isinstance(dezenas, list) or len(dezenas) != 15:
-        raise RuntimeError(f"Concurso {numero} sem 15 dezenas")
-
-    # converte data dd/MM/yyyy -> yyyy-MM-dd
-    iso_date = ""
-    if isinstance(data_ap, str) and "/" in data_ap:
-        try:
-            d, m, y = data_ap.split("/")
-            iso_date = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-        except Exception:
-            iso_date = ""
-    elif isinstance(data_ap, str):
-        # fallback caso já venha ISO
-        try:
-            dt = datetime.fromisoformat(data_ap)
-            iso_date = dt.date().isoformat()
-        except Exception:
-            iso_date = ""
-
-    dezenas_int = []
-    for x in dezenas:
-        try:
-            dezenas_int.append(int(str(x).strip()))
-        except Exception:
-            pass
-
-    if len(dezenas_int) != 15:
-        raise RuntimeError(f"Concurso {numero} dezenas inválidas")
-
-    dezenas_int.sort()
-    return [numero, iso_date] + dezenas_int
-
-def read_existing_last() -> int:
-    if not os.path.exists(OUT_PATH):
-        return 0
-    with open(OUT_PATH, "r", encoding="utf-8", newline="") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-    if not rows:
-        return 0
-
-    # se tem header, pula
-    start = 1 if rows[0] and rows[0][0].lower().startswith("concurso") else 0
-    if len(rows) <= start:
-        return 0
-
-    try:
-        last = int(rows[-1][0])
-        return last
-    except Exception:
-        return 0
-
-def ensure_dir():
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-
-def write_header_if_needed():
-    if os.path.exists(OUT_PATH) and os.path.getsize(OUT_PATH) > 0:
-        return
-    with open(OUT_PATH, "w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(HEADERS)
-
-def append_rows(rows):
-    with open(OUT_PATH, "a", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        for r in rows:
-            w.writerow(r)
-
-def main():
-    ensure_dir()
-    write_header_if_needed()
-
-    last_local = read_existing_last()
-    last_online = latest_concurso_numero()
-
-    print(f"Último no CSV local: {last_local}")
-    print(f"Último na API CAIXA: {last_online}")
-
-    if last_online <= last_local:
-        print("Nada para atualizar.")
-        return
-
-    new_rows = []
-    start = last_local + 1 if last_local > 0 else 1
-
-    # baixa todos os faltantes
-    for n in range(start, last_online + 1):
-        j = fetch_concurso(n)
-        row = parse_row(j)
-        new_rows.append(row)
-        if n % 50 == 0:
-            print(f"Baixados até: {n}")
-
-    append_rows(new_rows)
-    print(f"Atualizado! Adicionados: {len(new_rows)} concursos.")
-
-if __name__ == "__main__":
-    main()
+      - name: Commit e push se houver mudanças
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add data/lotofacil.csv
+          git diff --cached --quiet || git commit -m "Atualizar lotofacil.csv automaticamente"
+          git push
