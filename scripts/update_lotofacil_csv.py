@@ -1,55 +1,97 @@
-name: Atualizar Lotofácil CSV
+import csv
+import requests
+from pathlib import Path
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "20 3 * * *"
+# ============================================================
+# CONFIGURAÇÕES
+# ============================================================
 
-permissions:
-  contents: write
+CSV_URL = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
+OUTPUT_FILE = Path("data/lotofacil.csv")
 
-concurrency:
-  group: lotofacil-csv-update
-  cancel-in-progress: true
+HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0"
+}
 
-jobs:
-  update:
-    runs-on: ubuntu-latest
+# ============================================================
+# FUNÇÕES
+# ============================================================
 
-    steps:
-      - name: Checkout do repositório
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: true
+def fetch_all_contests():
+    """
+    Busca TODOS os concursos da Lotofácil diretamente da Caixa
+    """
+    response = requests.get(CSV_URL, headers=HEADERS, timeout=30)
+    response.raise_for_status()
 
-      - name: Configurar Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+    data = response.json()
 
-      - name: Instalar dependências
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+    concursos = []
 
-      - name: Executar script de atualização
-        run: |
-          python scripts/update_lotofacil_csv.py
+    # Concurso atual
+    concursos.append(parse_contest(data))
 
-      - name: Commit e push seguro (anti-conflito)
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+    # Concursos anteriores
+    for c in data.get("listaResultado", []):
+        concursos.append(parse_contest(c))
 
-          # Atualiza o main local com rebase (sem merge sujo)
-          git pull --rebase origin main
+    # Remove duplicados pelo número do concurso
+    concursos_dict = {c["concurso"]: c for c in concursos}
 
-          # Só segue se o CSV mudou
-          if [[ -n "$(git status --porcelain data/lotofacil.csv)" ]]; then
-            git add data/lotofacil.csv
-            git commit -m "Atualizar lotofacil.csv automaticamente"
-            git push --force-with-lease origin main
-          else
-            echo "Nenhuma mudança no CSV"
-          fi
+    # Ordena do concurso 1 até o último
+    return sorted(concursos_dict.values(), key=lambda x: x["concurso"])
+
+
+def parse_contest(raw):
+    """
+    Normaliza um concurso para o formato CSV
+    """
+    dezenas = raw.get("listaDezenas", [])
+
+    return {
+        "concurso": int(raw["numero"]),
+        "data": raw["dataApuracao"],
+        "dezenas": sorted(int(d) for d in dezenas)
+    }
+
+
+def save_csv(concursos):
+    """
+    Salva o CSV no padrão esperado pelo app
+    """
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    with OUTPUT_FILE.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+
+        # Cabeçalho
+        writer.writerow([
+            "concurso", "data",
+            "d1", "d2", "d3", "d4", "d5",
+            "d6", "d7", "d8", "d9", "d10",
+            "d11", "d12", "d13", "d14", "d15"
+        ])
+
+        # Dados
+        for c in concursos:
+            writer.writerow(
+                [c["concurso"], c["data"]] + c["dezenas"]
+            )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+    print("🔄 Buscando concursos da Lotofácil...")
+    concursos = fetch_all_contests()
+    print(f"✅ Total de concursos encontrados: {len(concursos)}")
+
+    save_csv(concursos)
+    print(f"💾 CSV atualizado em: {OUTPUT_FILE}")
+
+
+if __name__ == "__main__":
+    main()
