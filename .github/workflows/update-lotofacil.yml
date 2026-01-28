@@ -1,22 +1,28 @@
 name: Atualizar Lotofácil CSV
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '0 3 * * *'   # roda todo dia às 03:00 UTC
-  workflow_dispatch:      # permite rodar manualmente
+    # Ajuste o horário se quiser (UTC). Ex: 03:10 UTC = 00:10 Brasil (-3) em boa parte do ano
+    - cron: "10 3 * * *"
+
+permissions:
+  contents: write
 
 jobs:
-  update:
+  atualizar:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout do repositório
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Instalar dependências
         run: |
@@ -27,10 +33,24 @@ jobs:
         run: |
           python scripts/update_lotofacil_csv.py
 
+      # ✅ AQUI ESTÁ A CORREÇÃO DO SEU ERRO:
+      # garante que o runner traz as mudanças remotas antes de tentar push
+      - name: Pull latest changes (rebase)
+        run: |
+          git config pull.rebase true
+          git pull origin principal --rebase
+
       - name: Commit e push se houver mudanças
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
           git add data/lotofacil.csv
-          git diff --cached --quiet || git commit -m "Atualizar lotofacil.csv automaticamente"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "Sem mudanças no CSV. Nada para commitar."
+            exit 0
+          fi
+
+          git commit -m "Atualizar lotofacil.csv automaticamente"
+          git push origin principal
