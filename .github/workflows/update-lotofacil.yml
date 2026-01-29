@@ -1,9 +1,9 @@
 name: Atualizar Lotofácil CSV
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: "10 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,8 +19,6 @@ jobs:
     steps:
       - name: Checkout do repositório
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -30,7 +28,7 @@ jobs:
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests pandas
 
       - name: Executar script de atualização
         run: |
@@ -41,12 +39,12 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add data/lotofacil.csv
+          git pull --rebase origin main || true
 
-          if git diff --cached --quiet; then
-            echo "Sem alterações no CSV"
-            exit 0
+          if git status --porcelain | grep .; then
+            git add data/lotofacil.csv
+            git commit -m "Atualizar lotofacil.csv automaticamente"
+            git push origin main
+          else
+            echo "Nenhuma mudança detectada"
           fi
-
-          git commit -m "Atualizar lotofacil.csv automaticamente"
-          git push origin main
