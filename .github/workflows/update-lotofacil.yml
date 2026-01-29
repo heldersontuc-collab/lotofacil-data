@@ -3,12 +3,11 @@ name: Atualizar Lotofácil CSV
 on:
   workflow_dispatch:
   schedule:
-    - cron: "10 3 * * *"
+    - cron: "10 3 * * *" # 03:10 UTC (ajuste se quiser)
 
 permissions:
   contents: write
 
-# 🔒 TRAVA GLOBAL — ESSA É A CHAVE
 concurrency:
   group: lotofacil-csv-update
   cancel-in-progress: true
@@ -18,11 +17,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout do repositório
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -38,14 +36,14 @@ jobs:
         run: |
           python scripts/update_lotofacil_csv.py
 
-      - name: Sincronizar com remoto (rebase)
+      - name: Commit e push (robusto)
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
+          # SEMPRE sincroniza antes de tentar empurrar
           git pull origin principal --rebase
 
-      - name: Commit e push se houver mudanças
-        run: |
           git add data/lotofacil.csv
 
           if git diff --cached --quiet; then
@@ -54,4 +52,11 @@ jobs:
           fi
 
           git commit -m "Atualizar lotofacil.csv automaticamente"
-          git push origin principal
+
+          # Retry (se outro commit aparecer no meio do caminho)
+          for i in 1 2 3; do
+            git push origin HEAD:principal && break
+            echo "Push falhou, tentando novamente ($i)..."
+            git pull origin principal --rebase
+            sleep 3
+          done
