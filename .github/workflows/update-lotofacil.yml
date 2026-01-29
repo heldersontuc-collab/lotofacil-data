@@ -1,0 +1,69 @@
+name: Atualizar Lotofácil CSV
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lotofacil-csv-update
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Executar script de atualização
+        run: |
+          python scripts/update_lotofacil_csv.py
+
+      - name: Commit e push se houver mudanças
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Atualiza refs do remoto
+          git fetch origin main
+
+          # Se não mudou nada, sai
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Sem alterações para commitar."
+            exit 0
+          fi
+
+          # Rebase no main remoto ANTES de commitar (evita fetch-first)
+          git pull --rebase origin main
+
+          git add data/lotofacil.csv
+          git commit -m "Atualizar lotofacil.csv automaticamente"
+
+          # Push com tentativas (se alguém/algum run correr na frente)
+          for i in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Push OK ✅"
+              exit 0
+            fi
+
+            echo "Push falhou (tentativa $i). Fazendo rebase e tentando de novo..."
+            git pull --rebase origin main
+          done
+
+          echo "Falha ao fazer push após 3 tentativas."
+          exit 1
