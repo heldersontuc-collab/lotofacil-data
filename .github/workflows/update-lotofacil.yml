@@ -8,35 +8,31 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: lotofacil-csv-update
-  cancel-in-progress: true
-
 jobs:
   atualizar:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout do repositorio
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Instalar dependencias
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Executar script de atualizacao
+      - name: Run updater
         run: |
           python scripts/update_lotofacil_csv.py
 
-      - name: Commit e push se houver mudancas
+      - name: Commit and push
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -46,21 +42,9 @@ jobs:
           git add data/lotofacil.csv
 
           if git diff --cached --quiet; then
-            echo "Sem mudancas no CSV."
+            echo "No changes"
             exit 0
           fi
 
           git commit -m "Atualizar lotofacil.csv automaticamente"
-
-          for i in 1 2 3 4 5; do
-            echo "Tentativa $i de push..."
-            if git push origin main; then
-              echo "Push realizado com sucesso."
-              exit 0
-            fi
-            git pull --rebase origin main
-            sleep 3
-          done
-
-          echo "Falha ao realizar push apos varias tentativas."
-          exit 1
+          git push origin main
