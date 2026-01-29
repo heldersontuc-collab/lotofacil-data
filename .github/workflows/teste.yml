@@ -3,7 +3,7 @@ name: Atualizar Lotofácil CSV
 on:
   workflow_dispatch:
   schedule:
-    - cron: "10 3 * * *" # 03:10 UTC (ajuste se quiser)
+    - cron: "10 3 * * *" # 03:10 (UTC). Ajuste se quiser.
 
 permissions:
   contents: write
@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  atualizar:
+  update:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,22 +27,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Instalar dependências (se existir requirements.txt)
+      - name: Instalar dependências (se precisar)
         run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "Sem requirements.txt"
-          fi
+          python -m pip install --upgrade pip
 
       - name: Executar script de atualização
         run: |
           python scripts/update_lotofacil_csv.py
 
-      - name: Commit e push se houver mudanças (anti fetch-first)
+      - name: Commit e push se houver mudanças (com rebase e retry)
         run: |
+          set -e
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
+          # pega o estado mais novo do remoto pra evitar "fetch first"
+          git fetch origin main
+
+          # rebase no remoto (resolve 99% dos casos)
+          git rebase origin/main || (git rebase --abort && exit 1)
 
           git add data/lotofacil.csv
 
@@ -51,20 +55,19 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Atualizar lotofacil.csv automaticamente" || true
+          git commit -m "Atualizar lotofacil.csv automaticamente"
 
-          for i in 1 2 3 4 5; do
-            echo "Tentativa $i: pull --rebase + push"
-            git pull --rebase origin main || true
-
-            if git push origin main; then
-              echo "Push OK."
+          # tenta push; se der fetch-first, refaz fetch+rebase e tenta de novo
+          for i in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Push OK"
               exit 0
             fi
 
-            echo "Push rejeitado (fetch-first). Esperando e tentando novamente..."
-            sleep $((i*2))
+            echo "Push falhou (tentativa $i). Fazendo fetch+rebase e tentando novamente..."
+            git fetch origin main
+            git rebase origin/main || (git rebase --abort && exit 1)
           done
 
-          echo "Falhou após várias tentativas."
+          echo "Falhou após 3 tentativas de push."
           exit 1
