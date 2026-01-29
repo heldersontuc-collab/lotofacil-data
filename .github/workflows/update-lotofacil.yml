@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: Lotofacil-CSV-UPDATE
+  group: lotofacil-csv-update
   cancel-in-progress: true
 
 jobs:
@@ -21,7 +21,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -45,7 +44,7 @@ jobs:
           git add data/lotofacil.csv
 
           if git diff --cached --quiet; then
-            echo "Sem mudanças no CSV. Nada para commitar."
+            echo "Sem alterações no CSV"
             exit 0
           fi
 
