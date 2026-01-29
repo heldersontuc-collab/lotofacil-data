@@ -22,6 +22,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
+          ref: principal
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -33,14 +34,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Execututar script de atualização
+      - name: Executar script de atualização
         run: |
           python scripts/update_lotofacil_csv.py
 
-      - name: Commit e push se houver mudanças
+      - name: Commit e push se houver mudanças (com rebase + retry)
         run: |
+          set -e
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
+          # Sempre sincroniza com o remoto antes de mexer (evita corrida)
+          git fetch origin principal
+          git checkout principal
+          git pull --rebase origin principal
 
           git add data/lotofacil.csv
 
@@ -51,7 +59,17 @@ jobs:
 
           git commit -m "Atualizar lotofacil.csv automaticamente"
 
-          # Puxa o remoto antes do push (resolve corrida/conflito)
-          git pull origin principal --rebase
+          # Push com retry (porque pode ter corrida com outro run)
+          for i in 1 2 3 4 5; do
+            echo "Tentativa de push $i/5..."
+            if git push origin principal; then
+              echo "Push OK ✅"
+              exit 0
+            fi
+            echo "Push falhou, rebasing e tentando de novo..."
+            git pull --rebase origin principal
+            sleep 2
+          done
 
-          git push origin principal
+          echo "Falhou ao dar push após várias tentativas ❌"
+          exit 1
