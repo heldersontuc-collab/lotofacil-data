@@ -8,58 +8,43 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: lotofacil-csv-update
-  cancel-in-progress: true
-
 jobs:
   update:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout do repositório
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Verificar Python
-        run: |
-          which python
-          python --version
-
-      - name: Instalar dependências (FORÇADO)
+      - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
           python -m pip install requests
           python - <<EOF
           import requests
-          print("requests OK:", requests.__version__)
+          print("requests instalado:", requests.__version__)
           EOF
 
-      - name: Executar script de atualização
+      - name: Executar script
         run: |
           python scripts/update_lotofacil_csv.py
 
-      - name: Commit e push se houver mudanças
+      - name: Commit e push se houver mudança
         run: |
-          set -e
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git fetch origin main
-
           if [ -z "$(git status --porcelain)" ]; then
-            echo "Sem alterações no CSV."
+            echo "Nenhuma alteração"
             exit 0
           fi
 
-          git pull --rebase origin main
           git add data/lotofacil.csv
           git commit -m "Atualizar lotofacil.csv automaticamente"
-          git push origin HEAD:main
+          git pull --rebase origin main
+          git push origin main
