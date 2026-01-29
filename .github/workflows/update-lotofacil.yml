@@ -3,15 +3,13 @@ name: Atualizar Lotofácil CSV
 on:
   workflow_dispatch:
   schedule:
-    # Todos os dias às 03:10 UTC (00:10 Brasil)
     - cron: "10 3 * * *"
 
 permissions:
   contents: write
 
-# 🔒 TRAVA GLOBAL — EVITA DOIS JOBS AO MESMO TEMPO
 concurrency:
-  group: lotofacil-csv-update
+  group: Lotofacil-CSV-UPDATE
   cancel-in-progress: true
 
 jobs:
@@ -19,17 +17,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # =========================================================
-      # CHECKOUT
-      # =========================================================
       - name: Checkout do repositório
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # ⚠️ obrigatório para rebase funcionar
+          fetch-depth: 0
+          persist-credentials: true
 
-      # =========================================================
-      # PYTHON
-      # =========================================================
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
@@ -40,37 +33,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # =========================================================
-      # EXECUTA SCRIPT
-      # =========================================================
-      - name: Executar script de atualização
+      - name: Execututar script de atualização
         run: |
           python scripts/update_lotofacil_csv.py
 
-      # =========================================================
-      # COMMIT + PUSH (À PROVA DE CORRIDA)
-      # =========================================================
-      - name: Commit e push (à prova de corrida)
+      - name: Commit e push se houver mudanças
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          echo "🔄 Sincronizando com remoto (rebase inicial)..."
-          git pull origin principal --rebase || true
-
           git add data/lotofacil.csv
 
           if git diff --cached --quiet; then
-            echo "ℹ️ Nenhuma mudança detectada no CSV."
+            echo "Sem mudanças no CSV. Nada para commitar."
             exit 0
           fi
 
           git commit -m "Atualizar lotofacil.csv automaticamente"
 
-          echo "🚀 Tentando push com rebase e retry..."
-          for i in 1 2 3; do
-            git pull origin principal --rebase || true
-            git push origin HEAD:principal && break
-            echo "⚠️ Push falhou (tentativa $i), aguardando..."
-            sleep 3
-          done
+          # Puxa o remoto antes do push (resolve corrida/conflito)
+          git pull origin principal --rebase
+
+          git push origin principal
