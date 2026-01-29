@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: lotofacil-csv-update
+  group: Lotofacil-CSV-UPDATE
   cancel-in-progress: true
 
 jobs:
@@ -17,37 +17,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout do repositório
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
-      - name: Setup Python
+      - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Update CSV
+      - name: Executar script de atualização
         run: |
           python scripts/update_lotofacil_csv.py
 
-      - name: Commit and push if changed
+      - name: Commit e push se houver mudanças
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
+          # ✅ SINCRONIZA ANTES de commitar (evita fetch first)
+          git pull --rebase origin main
+          # 👆 se seu branch for "principal", troque "main" por "principal"
+
           git add data/lotofacil.csv
 
           if git diff --cached --quiet; then
-            echo "Sem mudanças"
+            echo "Sem mudanças no CSV. Nada para commitar."
             exit 0
           fi
 
           git commit -m "Atualizar lotofacil.csv automaticamente"
-          git pull --rebase
-          git push
+          git push origin main
+          # 👆 se seu branch for "principal", troque "main" por "principal"
