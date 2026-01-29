@@ -15,7 +15,6 @@ concurrency:
 jobs:
   atualizar:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout do repositório
         uses: actions/checkout@v4
@@ -42,9 +41,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # ✅ SINCRONIZA ANTES de commitar (evita fetch first)
           git pull --rebase origin main
-          # 👆 se seu branch for "principal", troque "main" por "principal"
 
           git add data/lotofacil.csv
 
@@ -55,4 +52,3 @@ jobs:
 
           git commit -m "Atualizar lotofacil.csv automaticamente"
           git push origin main
-          # 👆 se seu branch for "principal", troque "main" por "principal"
