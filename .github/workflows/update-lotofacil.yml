@@ -1,33 +1,66 @@
-- name: Commit e push se houver mudanças (anti fetch-first)
+name: Atualizar Lotofacil CSV
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lotofacil-csv-update
+  cancel-in-progress: true
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Executar script de atualizacao
+        run: |
+          python scripts/update_lotofacil_csv.py
+
+      - name: Commit e push se houver mudancas
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # 1) sempre sincroniza antes de mexer
           git pull --rebase origin main
 
-          # 2) agora adiciona e decide se tem mudança
           git add data/lotofacil.csv
 
           if git diff --cached --quiet; then
-            echo "Sem mudanças no CSV."
+            echo "Sem mudancas no CSV."
             exit 0
           fi
 
-          # 3) commita em cima do main atualizado
           git commit -m "Atualizar lotofacil.csv automaticamente"
 
-          # 4) push com retry (se outro job correr junto)
           for i in 1 2 3 4 5; do
             echo "Tentativa $i de push..."
             if git push origin main; then
-              echo "✅ Push OK"
+              echo "Push realizado com sucesso."
               exit 0
             fi
-            echo "Push falhou, rebasing e tentando de novo..."
             git pull --rebase origin main
             sleep 3
           done
 
-          echo "❌ Falhou após várias tentativas"
+          echo "Falha ao realizar push apos varias tentativas."
           exit 1
