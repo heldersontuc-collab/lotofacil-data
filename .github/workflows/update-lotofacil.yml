@@ -3,35 +3,55 @@ name: Atualizar Lotofácil CSV
 on:
   schedule:
     - cron: "5 1 * * *"
+    - cron: "10 3 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lotofacil-csv-writer
+  cancel-in-progress: false
 
 jobs:
   update:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout
+      - name: Checkout da base principal
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Executar atualização
-        run: python scripts/update_lotofacil_csv.py
-
-      - name: Commit e push se houver mudanças
+      - name: Atualizar, validar e publicar
+        shell: bash
         run: |
-          git pull --rebase
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add data/lotofacil.csv
-          if git diff --cached --quiet; then
-            echo "Nenhuma mudança"
-          else
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Checkout descartável do runner. Em concorrência, refazer a geração
+          # sobre main atual; nunca mesclar CSV gerado nem executar force-push.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+            python -m unittest discover -s tests -v
+            python scripts/update_lotofacil_csv.py
+            python scripts/update_lotofacil_csv.py --validate-only
+            if git diff --quiet -- data/lotofacil.csv; then
+              echo "Base validada; nenhuma alteração."
+              exit 0
+            fi
+            git add data/lotofacil.csv
             git commit -m "Atualizar lotofacil.csv automaticamente"
-            git push
-          fi
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push não confirmado; verificar main e regenerar (tentativa ${attempt}/3)."
+            sleep 5
+          done
+          echo "Não foi possível publicar após três tentativas." >&2
+          exit 1
